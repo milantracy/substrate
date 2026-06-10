@@ -27,6 +27,8 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateompath"
 )
 
+var _ ContainerRuntime = (*runsc)(nil)
+
 type runsc struct {
 	path                   string
 	actorTemplateNamespace string
@@ -34,7 +36,7 @@ type runsc struct {
 	actorID                string
 }
 
-func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName string) error {
+func (r *runsc) Create(ctx context.Context, out io.Writer, containerName string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 
@@ -67,7 +69,7 @@ func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName stri
 	return nil
 }
 
-func (r *runsc) cmdStart(ctx context.Context, out io.Writer, containerName string) error {
+func (r *runsc) Start(ctx context.Context, out io.Writer, containerName string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 
@@ -99,7 +101,7 @@ func (r *runsc) cmdStart(ctx context.Context, out io.Writer, containerName strin
 	return nil
 }
 
-func (r *runsc) cmdCheckpoint(ctx context.Context, containerName, checkpointPath string) error {
+func (r *runsc) Checkpoint(ctx context.Context, containerName, checkpointPath string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 
@@ -131,7 +133,7 @@ func (r *runsc) cmdCheckpoint(ctx context.Context, containerName, checkpointPath
 
 // We take a checkpoint only of the root container of the sandbox, but we need
 // to call restore on each container, using the same checkpoint.
-func (r *runsc) cmdRestore(ctx context.Context, out io.Writer, containerName, checkpointPath string) error {
+func (r *runsc) Restore(ctx context.Context, out io.Writer, containerName, checkpointPath string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 
@@ -165,7 +167,7 @@ func (r *runsc) cmdRestore(ctx context.Context, out io.Writer, containerName, ch
 	return nil
 }
 
-func (r *runsc) cmdDelete(ctx context.Context, containerName string) error {
+func (r *runsc) Delete(ctx context.Context, containerName string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 
@@ -194,7 +196,7 @@ func (r *runsc) cmdDelete(ctx context.Context, containerName string) error {
 	return nil
 }
 
-func (r *runsc) cmdState(ctx context.Context, containerName string) error {
+func (r *runsc) State(ctx context.Context, containerName string) error {
 	reapLock.RLock()
 	defer reapLock.RUnlock()
 

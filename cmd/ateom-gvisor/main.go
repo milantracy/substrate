@@ -270,7 +270,7 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 		return nil, fmt.Errorf("while restoring eth0 in interior netns: %w", err)
 	}
 
-	rcmd := &runsc{
+	var rt ContainerRuntime = &runsc{
 		path:                   req.GetRunscPath(),
 		actorTemplateNamespace: req.GetActorTemplateNamespace(),
 		actorTemplateName:      req.GetActorTemplateName(),
@@ -278,10 +278,10 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	}
 
 	// Create and start pause container
-	if err := rcmd.cmdCreate(ctx, os.Stdout, "pause"); err != nil {
+	if err := rt.Create(ctx, os.Stdout, "pause"); err != nil {
 		return nil, fmt.Errorf("while creating pause container: %w", err)
 	}
-	if err := rcmd.cmdStart(ctx, os.Stdout, "pause"); err != nil {
+	if err := rt.Start(ctx, os.Stdout, "pause"); err != nil {
 		return nil, fmt.Errorf("while starting pause container: %w", err)
 	}
 
@@ -293,10 +293,10 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 
 	// Create and start each application container
 	for _, ac := range req.GetSpec().GetContainers() {
-		if err := rcmd.cmdCreate(ctx, pw, ac.GetName()); err != nil {
+		if err := rt.Create(ctx, pw, ac.GetName()); err != nil {
 			return nil, fmt.Errorf("while creating %q application container: %w", ac.GetName(), err)
 		}
-		if err := rcmd.cmdStart(ctx, pw, ac.GetName()); err != nil {
+		if err := rt.Start(ctx, pw, ac.GetName()); err != nil {
 			return nil, fmt.Errorf("while starting %q application container: %w", ac.GetName(), err)
 		}
 	}
@@ -317,7 +317,7 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	//   * After we exit, atelet will upload checkpoint to GCS
 	//   * After we exit, atelet will tear down OCI bundles and reset the actor directory.
 
-	rcmd := &runsc{
+	var rt ContainerRuntime = &runsc{
 		path:                   req.GetRunscPath(),
 		actorTemplateNamespace: req.GetActorTemplateNamespace(),
 		actorTemplateName:      req.GetActorTemplateName(),
@@ -329,32 +329,34 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 		return nil, fmt.Errorf("while creating checkpoint directory: %w", err)
 	}
 
-	// Checkpoint pause container (root of the sandbox)
-	if err := rcmd.cmdCheckpoint(ctx, "pause", checkpointPath); err != nil {
+	// Checkpoint pause container (root of the sandbox).
+	// This always uses raw runsc — the shim's checkpoint API is per-container,
+	// but we need to snapshot the entire sandbox via the root container.
+	if err := rt.Checkpoint(ctx, "pause", checkpointPath); err != nil {
 		return nil, fmt.Errorf("while checkpointing pause: %w", err)
 	}
 
 	// Check state of all containers to mimic containerd.
 	//
 	// Without this, `runsc delete` occasionally throws an error.
-	if err := rcmd.cmdState(ctx, "pause"); err != nil {
+	if err := rt.State(ctx, "pause"); err != nil {
 		return nil, fmt.Errorf("while checking state of pause container: %w", err)
 	}
 	for _, ctr := range req.GetSpec().GetContainers() {
-		if err := rcmd.cmdState(ctx, ctr.GetName()); err != nil {
+		if err := rt.State(ctx, ctr.GetName()); err != nil {
 			return nil, fmt.Errorf("while deleting %q application container: %w", ctr.GetName(), err)
 		}
 	}
 
 	// Delete all application containers
 	for _, ctr := range req.GetSpec().GetContainers() {
-		if err := rcmd.cmdDelete(ctx, ctr.GetName()); err != nil {
+		if err := rt.Delete(ctx, ctr.GetName()); err != nil {
 			return nil, fmt.Errorf("while deleting %q application container: %w", ctr.GetName(), err)
 		}
 	}
 
 	// Delete pause container
-	if err := rcmd.cmdDelete(ctx, "pause"); err != nil {
+	if err := rt.Delete(ctx, "pause"); err != nil {
 		return nil, fmt.Errorf("while deleting pause container: %w", err)
 	}
 
@@ -448,7 +450,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 		return nil, fmt.Errorf("while restoring eth0 in interior netns: %w", err)
 	}
 
-	rcmd := &runsc{
+	var rt ContainerRuntime = &runsc{
 		path:                   req.GetRunscPath(),
 		actorTemplateNamespace: req.GetActorTemplateNamespace(),
 		actorTemplateName:      req.GetActorTemplateName(),
@@ -458,10 +460,10 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	checkpointDir := ateompath.RestoreStateDir(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId())
 
 	// Create and restore pause container
-	if err := rcmd.cmdCreate(ctx, os.Stdout, "pause"); err != nil {
+	if err := rt.Create(ctx, os.Stdout, "pause"); err != nil {
 		return nil, fmt.Errorf("while creating pause container: %w", err)
 	}
-	if err := rcmd.cmdRestore(ctx, os.Stdout, "pause", checkpointDir); err != nil {
+	if err := rt.Restore(ctx, os.Stdout, "pause", checkpointDir); err != nil {
 		return nil, fmt.Errorf("while starting pause container: %w", err)
 	}
 
@@ -473,10 +475,10 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 
 	// Create and restore each application container
 	for _, ac := range req.GetSpec().GetContainers() {
-		if err := rcmd.cmdCreate(ctx, pw, ac.GetName()); err != nil {
+		if err := rt.Create(ctx, pw, ac.GetName()); err != nil {
 			return nil, fmt.Errorf("while creating %q application container: %w", ac.GetName(), err)
 		}
-		if err := rcmd.cmdRestore(ctx, pw, ac.GetName(), checkpointDir); err != nil {
+		if err := rt.Restore(ctx, pw, ac.GetName(), checkpointDir); err != nil {
 			return nil, fmt.Errorf("while starting %q application container: %w", ac.GetName(), err)
 		}
 	}
