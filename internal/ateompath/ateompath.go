@@ -34,6 +34,10 @@ func RunSCBinaryPath(sha256 string) string {
 	return filepath.Join(StaticFilesDir, "runsc-"+sha256)
 }
 
+func ShimBinaryPath(sha256 string) string {
+	return filepath.Join(StaticFilesDir, "containerd-shim-runsc-v1-"+sha256)
+}
+
 func AteomPath(podUID string) string {
 	return filepath.Join(
 		BasePath,

@@ -270,11 +270,10 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 		return nil, fmt.Errorf("while restoring eth0 in interior netns: %w", err)
 	}
 
-	var rt ContainerRuntime = &runsc{
-		path:                   req.GetRunscPath(),
-		actorTemplateNamespace: req.GetActorTemplateNamespace(),
-		actorTemplateName:      req.GetActorTemplateName(),
-		actorID:                req.GetActorId(),
+	rt := newContainerRuntime(req.GetShimPath(), req.GetRunscPath(),
+		req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId())
+	if shim, ok := rt.(*shimRuntime); ok {
+		defer shim.Close()
 	}
 
 	// Create and start pause container

@@ -55,6 +55,11 @@ message RunWorkloadRequest {
   string runsc_path = 4;
 
   WorkloadSpec spec = 5;
+
+  // Path to the containerd-shim-runsc-v1 binary. When set, ateom uses the
+  // gVisor shim for container lifecycle (create/start/delete/state).
+  // runsc_path is still required for checkpoint and restore.
+  string shim_path = 7;
 }
 
 // WorkloadSpec parallels Pod, but with far fewer configurable fields.
@@ -74,6 +79,7 @@ message CheckpointWorkloadRequest {
   string actor_template_name      = 2;
   string actor_id                 = 3;
 
+  // Checkpoint always uses raw runsc (sandbox-level snapshot).
   string runsc_path = 4;
 
   WorkloadSpec spec = 5;
@@ -98,6 +104,7 @@ message RestoreWorkloadRequest {
   string actor_template_name      = 2;
   string actor_id                 = 3;
 
+  // Restore always uses raw runsc (not exposed via shim ttrpc API).
   string runsc_path = 4;
 
   WorkloadSpec spec = 5;

@@ -283,6 +283,74 @@ func (s *AteomHerder) fetchRunsc(ctx context.Context, cfg *ateletpb.RunscConfig)
 	return localPath, nil
 }
 
+func (s *AteomHerder) fetchShim(ctx context.Context, cfg *ateletpb.ShimConfig) (string, error) {
+	var platCfg *ateletpb.RunscPlatformConfig
+	switch runtime.GOARCH {
+	case "amd64":
+		platCfg = cfg.GetAmd64()
+	case "arm64":
+		platCfg = cfg.GetArm64()
+	}
+	if platCfg.GetUrl() == "" {
+		return "", nil
+	}
+
+	localPath := ateompath.ShimBinaryPath(platCfg.GetSha256Hash())
+	_, err := os.Stat(localPath)
+	if err == nil {
+		return localPath, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("while stat-ing local file: %w", err)
+	}
+
+	client := s.anonGCSClient
+	if cfg.GetAuthentication().GetGcp().GetUse() {
+		client = s.gcsClient
+	}
+
+	content, err := ategcs.FetchFromGCS(ctx, client, platCfg.GetUrl())
+	if err != nil {
+		return "", fmt.Errorf("while fetching %v: %w", platCfg.GetUrl(), err)
+	}
+
+	sum := sha256.Sum256(content)
+	wantSum, err := hex.DecodeString(platCfg.GetSha256Hash())
+	if err != nil {
+		return "", fmt.Errorf("while parsing sha256 hash: %w", err)
+	}
+	if !bytes.Equal(sum[:], wantSum) {
+		return "", fmt.Errorf("sha256 mismatch; got=%s want=%s", hex.EncodeToString(sum[:]), platCfg.GetSha256Hash())
+	}
+
+	tmpFileName, err := func() (string, error) {
+		localDir := filepath.Dir(localPath)
+		tmpFile, err := os.CreateTemp(localDir, filepath.Base(localPath)+"-download-")
+		if err != nil {
+			return "", fmt.Errorf("while temp file: %w", err)
+		}
+		defer tmpFile.Close()
+
+		if _, err := tmpFile.Write(content); err != nil {
+			return "", fmt.Errorf("while writing content to temp file: %w", err)
+		}
+
+		if err := tmpFile.Chmod(0o755); err != nil {
+			return "", fmt.Errorf("while setting file mode: %w", err)
+		}
+
+		return tmpFile.Name(), nil
+	}()
+	if err != nil {
+		return "", fmt.Errorf("while populating temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpFileName, localPath); err != nil {
+		return "", fmt.Errorf("while renaming temp file to target: %w", err)
+	}
+
+	return localPath, nil
+}
+
 func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*ateletpb.RunResponse, error) {
 	if err := validateRunRequest(req); err != nil {
 		// status.Error so the interceptor surfaces InvalidArgument and the
@@ -293,6 +361,14 @@ func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*atele
 	runscPath, err := s.fetchRunscAndPrep(ctx, req.GetRunsc())
 	if err != nil {
 		return nil, err
+	}
+
+	var shimPath string
+	if req.GetShim() != nil {
+		shimPath, err = s.fetchShim(ctx, req.GetShim())
+		if err != nil {
+			return nil, fmt.Errorf("in fetchShim: %w", err)
+		}
 	}
 
 	if err := resetActorDirs(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId()); err != nil {
@@ -311,13 +387,12 @@ func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*atele
 		return nil, err
 	}
 
-	// Tell ateom to do runsc create + runsc start for pause container and
-	// all application containers.
 	if _, err := client.RunWorkload(ctx, &ateompb.RunWorkloadRequest{
 		ActorTemplateNamespace: req.GetActorTemplateNamespace(),
 		ActorTemplateName:      req.GetActorTemplateName(),
 		ActorId:                req.GetActorId(),
 		RunscPath:              runscPath,
+		ShimPath:               shimPath,
 		Spec:                   buildAteomWorkloadSpec(req.GetSpec()),
 	}); err != nil {
 		return nil, fmt.Errorf("while calling ateom.RunWorkload: %w", err)

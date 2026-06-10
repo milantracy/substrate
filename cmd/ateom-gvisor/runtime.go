@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 )
 
 type ContainerRuntime interface {
@@ -28,4 +29,26 @@ type ContainerRuntime interface {
 	Restore(ctx context.Context, out io.Writer, containerName, checkpointPath string) error
 	Delete(ctx context.Context, containerName string) error
 	State(ctx context.Context, containerName string) error
+}
+
+// newContainerRuntime returns a shimRuntime if shimPath is set, otherwise
+// a raw runsc runtime.
+func newContainerRuntime(shimPath, runscPath, actorTemplateNamespace, actorTemplateName, actorID string) ContainerRuntime {
+	if shimPath != "" {
+		slog.Info("Using gVisor shim runtime",
+			slog.String("shim_path", shimPath),
+			slog.String("runsc_path", runscPath))
+		return &shimRuntime{
+			shimPath:               shimPath,
+			actorTemplateNamespace: actorTemplateNamespace,
+			actorTemplateName:      actorTemplateName,
+			actorID:                actorID,
+		}
+	}
+	return &runsc{
+		path:                   runscPath,
+		actorTemplateNamespace: actorTemplateNamespace,
+		actorTemplateName:      actorTemplateName,
+		actorID:                actorID,
+	}
 }

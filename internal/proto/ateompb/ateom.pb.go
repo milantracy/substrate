@@ -42,8 +42,12 @@ type RunWorkloadRequest struct {
 	ActorId                string                 `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	RunscPath              string                 `protobuf:"bytes,4,opt,name=runsc_path,json=runscPath,proto3" json:"runsc_path,omitempty"`
 	Spec                   *WorkloadSpec          `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Path to the containerd-shim-runsc-v1 binary. When set, ateom uses the
+	// gVisor shim for container lifecycle (create/start/delete/state).
+	// runsc_path is still required for checkpoint and restore.
+	ShimPath      string `protobuf:"bytes,7,opt,name=shim_path,json=shimPath,proto3" json:"shim_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunWorkloadRequest) Reset() {
@@ -109,6 +113,13 @@ func (x *RunWorkloadRequest) GetSpec() *WorkloadSpec {
 		return x.Spec
 	}
 	return nil
+}
+
+func (x *RunWorkloadRequest) GetShimPath() string {
+	if x != nil {
+		return x.ShimPath
+	}
+	return ""
 }
 
 // WorkloadSpec parallels Pod, but with far fewer configurable fields.
@@ -241,8 +252,9 @@ type CheckpointWorkloadRequest struct {
 	ActorTemplateNamespace string                 `protobuf:"bytes,1,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	ActorTemplateName      string                 `protobuf:"bytes,2,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
 	ActorId                string                 `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	RunscPath              string                 `protobuf:"bytes,4,opt,name=runsc_path,json=runscPath,proto3" json:"runsc_path,omitempty"`
-	Spec                   *WorkloadSpec          `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
+	// Checkpoint always uses raw runsc (sandbox-level snapshot).
+	RunscPath string        `protobuf:"bytes,4,opt,name=runsc_path,json=runscPath,proto3" json:"runsc_path,omitempty"`
+	Spec      *WorkloadSpec `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
 	// An object storage URI prefix below which the checkpoint data will be
 	// stored.
 	//
@@ -369,8 +381,9 @@ type RestoreWorkloadRequest struct {
 	ActorTemplateNamespace string                 `protobuf:"bytes,1,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	ActorTemplateName      string                 `protobuf:"bytes,2,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
 	ActorId                string                 `protobuf:"bytes,3,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	RunscPath              string                 `protobuf:"bytes,4,opt,name=runsc_path,json=runscPath,proto3" json:"runsc_path,omitempty"`
-	Spec                   *WorkloadSpec          `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
+	// Restore always uses raw runsc (not exposed via shim ttrpc API).
+	RunscPath string        `protobuf:"bytes,4,opt,name=runsc_path,json=runscPath,proto3" json:"runsc_path,omitempty"`
+	Spec      *WorkloadSpec `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
 	// The object storage URI prefix of the snapshot to restore.
 	SnapshotUriPrefix string `protobuf:"bytes,6,opt,name=snapshot_uri_prefix,json=snapshotUriPrefix,proto3" json:"snapshot_uri_prefix,omitempty"`
 	unknownFields     protoimpl.UnknownFields
@@ -489,14 +502,15 @@ var File_ateom_proto protoreflect.FileDescriptor
 
 const file_ateom_proto_rawDesc = "" +
 	"\n" +
-	"\vateom.proto\x12\x05ateom\"\xe1\x01\n" +
+	"\vateom.proto\x12\x05ateom\"\xfe\x01\n" +
 	"\x12RunWorkloadRequest\x128\n" +
 	"\x18actor_template_namespace\x18\x01 \x01(\tR\x16actorTemplateNamespace\x12.\n" +
 	"\x13actor_template_name\x18\x02 \x01(\tR\x11actorTemplateName\x12\x19\n" +
 	"\bactor_id\x18\x03 \x01(\tR\aactorId\x12\x1d\n" +
 	"\n" +
 	"runsc_path\x18\x04 \x01(\tR\trunscPath\x12'\n" +
-	"\x04spec\x18\x05 \x01(\v2\x13.ateom.WorkloadSpecR\x04spec\"@\n" +
+	"\x04spec\x18\x05 \x01(\v2\x13.ateom.WorkloadSpecR\x04spec\x12\x1b\n" +
+	"\tshim_path\x18\a \x01(\tR\bshimPath\"@\n" +
 	"\fWorkloadSpec\x120\n" +
 	"\n" +
 	"containers\x18\x01 \x03(\v2\x10.ateom.ContainerR\n" +

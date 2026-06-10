@@ -42,6 +42,11 @@ message RunRequest {
   RunscConfig runsc = 8;
 
   WorkloadSpec spec = 7;
+
+  // Optional shim config. When set, ateom uses the gVisor containerd shim
+  // (containerd-shim-runsc-v1) for container lifecycle instead of raw runsc.
+  // runsc config is still required for checkpoint and restore operations.
+  ShimConfig shim = 9;
 }
 
 message GCPAuthenticationConfig {
@@ -66,6 +71,15 @@ message RunscConfig {
   RunscPlatformConfig arm64 = 2;
 
   // How should atelet authenticate to fetch the runsc binary?
+  AuthenticationConfig authentication = 3;
+}
+
+// ShimConfig specifies how to download the containerd-shim-runsc-v1 binary.
+// Follows the same pattern as RunscConfig.
+message ShimConfig {
+  RunscPlatformConfig amd64 = 1;
+  RunscPlatformConfig arm64 = 2;
+
   AuthenticationConfig authentication = 3;
 }
 
