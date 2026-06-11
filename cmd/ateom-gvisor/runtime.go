@@ -40,6 +40,7 @@ func newContainerRuntime(shimPath, runscPath, actorTemplateNamespace, actorTempl
 			slog.String("runsc_path", runscPath))
 		return &shimRuntime{
 			shimPath:               shimPath,
+			runscPath:              runscPath,
 			actorTemplateNamespace: actorTemplateNamespace,
 			actorTemplateName:      actorTemplateName,
 			actorID:                actorID,

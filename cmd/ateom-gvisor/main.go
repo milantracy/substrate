@@ -273,7 +273,13 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	rt := newContainerRuntime(req.GetShimPath(), req.GetRunscPath(),
 		req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId())
 	if shim, ok := rt.(*shimRuntime); ok {
-		defer shim.Close()
+		defer func() {
+			if retErr != nil {
+				shim.Shutdown(ctx)
+			} else {
+				shim.Close()
+			}
+		}()
 	}
 
 	// Create and start pause container

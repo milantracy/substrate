@@ -39,6 +39,7 @@ var _ ContainerRuntime = (*shimRuntime)(nil)
 
 type shimRuntime struct {
 	shimPath               string
+	runscPath              string
 	actorTemplateNamespace string
 	actorTemplateName      string
 	actorID                string
@@ -72,6 +73,16 @@ func (s *shimRuntime) ensureStarted(ctx context.Context, bundlePath string) erro
 	stateDir := s.stateDir()
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("creating shim state dir: %w", err)
+	}
+
+	// Write config.toml into the bundle directory so the shim uses the
+	// same runsc root and binary that raw runsc commands use. The shim
+	// reads config.toml from its cwd (the bundle path) as a fallback.
+	runscRoot := ateompath.RunSCStateDir(s.actorTemplateNamespace, s.actorTemplateName, s.actorID)
+	shimConfig := fmt.Sprintf("root = %q\nbinary_name = %q\n", runscRoot, s.runscPath)
+	configPath := filepath.Join(bundlePath, "config.toml")
+	if err := os.WriteFile(configPath, []byte(shimConfig), 0o600); err != nil {
+		return fmt.Errorf("writing shim config.toml: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, s.shimPath,
