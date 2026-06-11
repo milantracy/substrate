@@ -359,6 +359,9 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 		return nil, fmt.Errorf("while deleting pause container: %w", err)
 	}
 
+	// Stop the shim daemon if one was started by RunWorkload.
+	cleanupShim(ctx, req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId())
+
 	// Yoink eth0 back to the pod netns.
 	podNetNS, err := netns.Get()
 	if err != nil {

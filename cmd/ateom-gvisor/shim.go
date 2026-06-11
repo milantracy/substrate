@@ -22,7 +22,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -49,6 +51,14 @@ type shimRuntime struct {
 	taskClient taskapi.TTRPCTaskService
 }
 
+func (s *shimRuntime) sandboxID() string {
+	return s.actorTemplateNamespace + ":" + s.actorTemplateName + ":" + s.actorID
+}
+
+func (s *shimRuntime) stateDir() string {
+	return ateompath.ShimStateDir(s.actorTemplateNamespace, s.actorTemplateName, s.actorID)
+}
+
 // ensureStarted launches the shim daemon if it hasn't been started yet.
 // bundlePath is used as the working directory for the shim start command.
 func (s *shimRuntime) ensureStarted(ctx context.Context, bundlePath string) error {
@@ -59,11 +69,14 @@ func (s *shimRuntime) ensureStarted(ctx context.Context, bundlePath string) erro
 		return nil
 	}
 
-	sandboxID := s.actorTemplateNamespace + ":" + s.actorTemplateName + ":" + s.actorID
+	stateDir := s.stateDir()
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return fmt.Errorf("creating shim state dir: %w", err)
+	}
 
 	cmd := exec.CommandContext(ctx, s.shimPath,
 		"-namespace", "ateom",
-		"-id", sandboxID,
+		"-id", s.sandboxID(),
 		"-address", "/dev/null",
 		"start",
 	)
@@ -79,6 +92,14 @@ func (s *shimRuntime) ensureStarted(ctx context.Context, bundlePath string) erro
 
 	s.shimAddr = strings.TrimSpace(string(out))
 	slog.InfoContext(ctx, "Shim daemon started", slog.String("address", s.shimAddr))
+
+	// Persist shim info so CheckpointWorkload can clean up the daemon later.
+	if err := os.WriteFile(filepath.Join(stateDir, "shim_path"), []byte(s.shimPath), 0o600); err != nil {
+		return fmt.Errorf("persisting shim path: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "address"), []byte(s.shimAddr), 0o600); err != nil {
+		return fmt.Errorf("persisting shim address: %w", err)
+	}
 
 	conn, err := net.Dial("unix", s.shimAddr)
 	if err != nil {
@@ -183,7 +204,8 @@ func (s *shimRuntime) State(ctx context.Context, containerName string) error {
 	return nil
 }
 
-// Close tears down the ttrpc connection to the shim.
+// Close tears down the ttrpc connection to the shim. It does NOT stop the
+// shim daemon — use Shutdown for that.
 func (s *shimRuntime) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -199,4 +221,92 @@ func (s *shimRuntime) Close() error {
 	s.started = false
 
 	return nil
+}
+
+// Shutdown sends a Shutdown RPC to stop the shim daemon process, then
+// closes the ttrpc connection and runs the delete subcommand to clean
+// up state files.
+func (s *shimRuntime) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	if s.taskClient != nil {
+		if _, err := s.taskClient.Shutdown(ctx, &taskapi.ShutdownRequest{ID: s.sandboxID(), Now: true}); err != nil {
+			slog.WarnContext(ctx, "Shim Shutdown RPC failed", slog.Any("err", err))
+		} else {
+			slog.InfoContext(ctx, "Shim daemon stopped via Shutdown RPC")
+		}
+	}
+	s.mu.Unlock()
+
+	s.Close()
+
+	bundlePath := ateompath.OCIBundlePath(s.actorTemplateNamespace, s.actorTemplateName, s.actorID, "pause")
+	cmd := exec.CommandContext(ctx, s.shimPath,
+		"-namespace", "ateom",
+		"-id", s.sandboxID(),
+		"-address", "/dev/null",
+		"-bundle", bundlePath,
+		"delete",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.WarnContext(ctx, "Shim delete subcommand returned error",
+			slog.Any("err", err), slog.String("output", string(out)))
+	}
+
+	os.RemoveAll(s.stateDir())
+	return nil
+}
+
+// cleanupShim stops any orphaned shim daemon for the given actor by reading
+// the persisted shim state. Called by CheckpointWorkload after raw runsc
+// checkpoint+delete has already terminated the sandbox.
+func cleanupShim(ctx context.Context, actorTemplateNamespace, actorTemplateName, actorID string) {
+	stateDir := ateompath.ShimStateDir(actorTemplateNamespace, actorTemplateName, actorID)
+
+	shimPathBytes, err := os.ReadFile(filepath.Join(stateDir, "shim_path"))
+	if err != nil {
+		return
+	}
+	shimPath := strings.TrimSpace(string(shimPathBytes))
+	if shimPath == "" {
+		return
+	}
+
+	// Send Shutdown RPC to stop the daemon process. The delete subcommand
+	// only cleans up state files — it does not kill the daemon.
+	addrBytes, err := os.ReadFile(filepath.Join(stateDir, "address"))
+	if err == nil {
+		addr := strings.TrimSpace(string(addrBytes))
+		if addr != "" {
+			if conn, dialErr := net.Dial("unix", addr); dialErr == nil {
+				tc := ttrpc.NewClient(conn)
+				client := taskapi.NewTTRPCTaskClient(tc)
+				sandboxID := actorTemplateNamespace + ":" + actorTemplateName + ":" + actorID
+				if _, shutErr := client.Shutdown(ctx, &taskapi.ShutdownRequest{ID: sandboxID, Now: true}); shutErr != nil {
+					slog.WarnContext(ctx, "Shim Shutdown RPC failed", slog.Any("err", shutErr))
+				} else {
+					slog.InfoContext(ctx, "Shim daemon stopped via Shutdown RPC")
+				}
+				tc.Close()
+				conn.Close()
+			}
+		}
+	}
+
+	// Clean up shim state files.
+	sandboxID := actorTemplateNamespace + ":" + actorTemplateName + ":" + actorID
+	bundlePath := ateompath.OCIBundlePath(actorTemplateNamespace, actorTemplateName, actorID, "pause")
+	cmd := exec.CommandContext(ctx, shimPath,
+		"-namespace", "ateom",
+		"-id", sandboxID,
+		"-address", "/dev/null",
+		"-bundle", bundlePath,
+		"delete",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.WarnContext(ctx, "Shim delete subcommand returned error", slog.Any("err", err), slog.String("output", string(out)))
+	}
+
+	os.RemoveAll(stateDir)
 }

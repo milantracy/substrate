@@ -799,5 +799,10 @@ func resetActorDirs(actorTemplateNamespace, actorTemplateName, actorID string) e
 		return fmt.Errorf("while creating restore-state dir: %w", err)
 	}
 
+	shimStateDir := ateompath.ShimStateDir(actorTemplateNamespace, actorTemplateName, actorID)
+	if err := os.RemoveAll(shimStateDir); err != nil {
+		return fmt.Errorf("while deleting shim-state dir: %w", err)
+	}
+
 	return nil
 }

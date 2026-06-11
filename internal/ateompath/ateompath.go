@@ -79,6 +79,13 @@ func RunSCStateDir(actorTemplateNamespace, actorTemplateName, actorID string) st
 	)
 }
 
+func ShimStateDir(actorTemplateNamespace, actorTemplateName, actorID string) string {
+	return filepath.Join(
+		ActorPath(actorTemplateNamespace, actorTemplateName, actorID),
+		"shim-state",
+	)
+}
+
 func OCIBundleDir(actorTemplateNamespace, actorTemplateName, actorID string) string {
 	return filepath.Join(
 		ActorPath(actorTemplateNamespace, actorTemplateName, actorID),
